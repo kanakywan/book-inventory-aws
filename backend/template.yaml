@@ -1,0 +1,164 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: App Minha Biblioteca - cadastro de livros por foto
+
+Globals:
+  Function:
+    Runtime: python3.11
+    Timeout: 30
+    MemorySize: 256
+    Environment:
+      Variables:
+        BOOKS_TABLE: !Ref BooksTable
+        COVERS_BUCKET: !Ref CoversBucket
+
+Resources:
+  BooksTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: BooksTable
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+
+  CoversBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders:
+              - "*"
+            AllowedMethods:
+              - PUT
+              - GET
+            AllowedOrigins:
+              - "*"
+
+  BookUsersPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: book-users
+      AutoVerifiedAttributes:
+        - email
+      UsernameAttributes:
+        - email
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: false
+          RequireUppercase: true
+
+  BookUsersClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: book-web-client
+      UserPoolId: !Ref BookUsersPool
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+        - ALLOW_USER_SRP_AUTH
+
+  BookApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      Auth:
+        Authorizers:
+          CognitoAuthorizer:
+            IdentitySource: "$request.header.Authorization"
+            JwtConfiguration:
+              issuer: !Sub "https://cognito-idp.${AWS::Region}.amazonaws.com/${BookUsersPool}"
+              audience:
+                - !Ref BookUsersClient
+        DefaultAuthorizer: CognitoAuthorizer
+      CorsConfiguration:
+        AllowMethods:
+          - GET
+          - POST
+          - DELETE
+          - OPTIONS
+        AllowHeaders:
+          - Authorization
+          - Content-Type
+        AllowOrigins:
+          - "*"
+
+  BookFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: handlers.lambda_handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref BooksTable
+        - S3CrudPolicy:
+            BucketName: !Ref CoversBucket
+        - Statement:
+            - Effect: Allow
+              Action:
+                - rekognition:DetectText
+              Resource: "*"
+      Events:
+        UploadUrl:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref BookApi
+            Path: /books/upload-url
+            Method: POST
+        ScanBook:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref BookApi
+            Path: /books/scan
+            Method: POST
+        CreateBook:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref BookApi
+            Path: /books
+            Method: POST
+        ListBooks:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref BookApi
+            Path: /books
+            Method: GET
+        SearchBooks:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref BookApi
+            Path: /books/search
+            Method: GET
+        DeleteBook:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref BookApi
+            Path: /books/{bookId}
+            Method: DELETE
+
+Outputs:
+  ApiUrl:
+    Description: URL da API
+    Value: !Sub "https://${BookApi}.execute-api.${AWS::Region}.amazonaws.com"
+
+  UserPoolId:
+    Description: Cognito User Pool ID
+    Value: !Ref BookUsersPool
+
+  UserPoolClientId:
+    Description: Cognito User Pool Client ID
+    Value: !Ref BookUsersClient
+
+  CoversBucketName:
+    Description: Bucket de capas
+    Value: !Ref CoversBucket
