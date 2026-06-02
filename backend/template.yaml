@@ -39,8 +39,15 @@ Resources:
             AllowedMethods:
               - PUT
               - GET
+              - HEAD
             AllowedOrigins:
-              - "*"
+              - "https://main.d1hfu19yup9flj.amplifyapp.com"
+              - "https://www.giana.top"
+              - "https://giana.top"
+              - "http://localhost:5173"
+            ExposedHeaders:
+              - ETag
+            MaxAge: 3000
 
   BookUsersPool:
     Type: AWS::Cognito::UserPool
@@ -50,6 +57,8 @@ Resources:
         - email
       UsernameAttributes:
         - email
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: true
       Policies:
         PasswordPolicy:
           MinimumLength: 8
@@ -90,9 +99,14 @@ Resources:
         AllowHeaders:
           - Authorization
           - Content-Type
+          - X-Amz-Date
+          - X-Amz-Security-Token
+          - X-Api-Key
         AllowOrigins:
-          - "*"
-
+          - "https://main.d1hfu19yup9flj.amplifyapp.com"
+          - "https://www.giana.top"
+          - "https://giana.top"
+          - "http://localhost:5173"    
   BookFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -115,30 +129,35 @@ Resources:
             ApiId: !Ref BookApi
             Path: /books/upload-url
             Method: POST
+
         ScanBook:
           Type: HttpApi
           Properties:
             ApiId: !Ref BookApi
             Path: /books/scan
             Method: POST
+
         CreateBook:
           Type: HttpApi
           Properties:
             ApiId: !Ref BookApi
             Path: /books
             Method: POST
+
         ListBooks:
           Type: HttpApi
           Properties:
             ApiId: !Ref BookApi
             Path: /books
             Method: GET
+
         SearchBooks:
           Type: HttpApi
           Properties:
             ApiId: !Ref BookApi
             Path: /books/search
             Method: GET
+
         DeleteBook:
           Type: HttpApi
           Properties:
