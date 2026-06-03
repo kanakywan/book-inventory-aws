@@ -11,7 +11,7 @@ from book_parser import normalize_text, suggest_book_from_text
 
 dynamodb = boto3.resource("dynamodb")
 s3 = boto3.client("s3")
-rekognition = boto3.client("rekognition")
+rekognition = boto3.client("rekognition", region_name="us-east-1")
 
 BOOKS_TABLE = os.environ["BOOKS_TABLE"]
 COVERS_BUCKET = os.environ["COVERS_BUCKET"]
@@ -127,6 +127,7 @@ def create_upload_url(event):
 
 def scan_book_cover(event):
     user_id = get_user_id(event)
+
     body = json.loads(event.get("body") or "{}")
     image_key = body.get("imageKey")
 
@@ -136,15 +137,41 @@ def scan_book_cover(event):
     if not image_key.startswith(f"covers/{user_id}/"):
         return response(403, {"message": "Imagem não pertence ao usuário"})
 
+    image_object = s3.get_object(
+        Bucket=COVERS_BUCKET,
+        Key=image_key,
+    )
+
+    image_bytes = image_object["Body"].read()
+
+    if len(image_bytes) > 5 * 1024 * 1024:
+        return response(
+            400,
+            {
+                "message": "Imagem muito grande. Use uma foto menor, com até 5 MB."
+            },
+        )
+
     result = rekognition.detect_text(
         Image={
-            "S3Object": {
-                "Bucket": COVERS_BUCKET,
-                "Name": image_key,
-            }
+            "Bytes": image_bytes
         }
     )
 
+    detected_lines = []
+    for item in result.get("TextDetections", []):
+        if item.get("Type") == "LINE" and item.get("Confidence", 0) >= 60:
+            detected_lines.append(item.get("DetectedText", ""))
+
+    suggestion = suggest_book_from_text(detected_lines)
+
+    return response(
+        200,
+        {
+            "detectedText": detected_lines,
+            "suggestion": suggestion,
+        },
+    )
     detected_lines = []
     for item in result.get("TextDetections", []):
         if item.get("Type") == "LINE" and item.get("Confidence", 0) >= 60:
