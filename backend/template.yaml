@@ -106,7 +106,9 @@ Resources:
           - "https://main.d1hfu19yup9flj.amplifyapp.com"
           - "https://www.giana.top"
           - "https://giana.top"
-          - "http://localhost:5173"    
+          - "http://localhost:5173"
+        MaxAge: 600
+
   BookFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -117,7 +119,8 @@ Resources:
             TableName: !Ref BooksTable
         - S3CrudPolicy:
             BucketName: !Ref CoversBucket
-        - Statement:
+        - Version: "2012-10-17"
+          Statement:
             - Effect: Allow
               Action:
                 - rekognition:DetectText
