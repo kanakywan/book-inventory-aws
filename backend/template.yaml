@@ -119,8 +119,7 @@ Resources:
             TableName: !Ref BooksTable
         - S3CrudPolicy:
             BucketName: !Ref CoversBucket
-        - Version: "2012-10-17"
-          Statement:
+        - Statement:
             - Effect: Allow
               Action:
                 - rekognition:DetectText
@@ -132,35 +131,30 @@ Resources:
             ApiId: !Ref BookApi
             Path: /books/upload-url
             Method: POST
-
         ScanBook:
           Type: HttpApi
           Properties:
             ApiId: !Ref BookApi
             Path: /books/scan
             Method: POST
-
         CreateBook:
           Type: HttpApi
           Properties:
             ApiId: !Ref BookApi
             Path: /books
             Method: POST
-
         ListBooks:
           Type: HttpApi
           Properties:
             ApiId: !Ref BookApi
             Path: /books
             Method: GET
-
         SearchBooks:
           Type: HttpApi
           Properties:
             ApiId: !Ref BookApi
             Path: /books/search
             Method: GET
-
         DeleteBook:
           Type: HttpApi
           Properties:

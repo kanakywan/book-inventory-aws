@@ -24,10 +24,19 @@ function App() {
 
   async function getToken() {
     const session = await fetchAuthSession()
+
+    if (!session.tokens?.idToken) {
+      throw new Error('Sessão inválida. Faça login novamente.')
+    }
+
     return session.tokens.idToken.toString()
   }
 
   async function api(path, options = {}) {
+    if (!API_URL) {
+      throw new Error('VITE_API_URL não está configurada no frontend.')
+    }
+
     const token = await getToken()
 
     const response = await fetch(`${API_URL}${path}`, {
@@ -39,10 +48,19 @@ function App() {
       },
     })
 
-    const data = await response.json()
+    const responseText = await response.text()
+
+    let data = {}
+    if (responseText) {
+      try {
+        data = JSON.parse(responseText)
+      } catch {
+        data = { message: responseText }
+      }
+    }
 
     if (!response.ok) {
-      throw new Error(data.message || 'Erro ao chamar a API')
+      throw new Error(data.message || `Erro na API. Status: ${response.status}`)
     }
 
     return data
@@ -62,36 +80,66 @@ function App() {
   }, [])
 
   async function handleScan() {
+    let currentStep = 'Início'
+
     try {
       setMessage('')
       setLoading(true)
+
+      if (!API_URL) {
+        setMessage('Erro: VITE_API_URL não está configurada no frontend.')
+        return
+      }
 
       if (!file) {
         alert('Escolha ou tire uma foto da capa primeiro.')
         return
       }
 
+      const contentType = file.type || 'image/jpeg'
+
+      if (!['image/jpeg', 'image/png'].includes(contentType)) {
+        setMessage(`Formato não suportado: ${contentType}. Use foto em JPEG ou PNG.`)
+        return
+      }
+
+      currentStep = 'Etapa 1 - Gerar URL de upload na API'
+      setMessage(`${currentStep}. Tipo da imagem: ${contentType}`)
+
       const uploadData = await api('/books/upload-url', {
         method: 'POST',
-        body: JSON.stringify({
-          contentType: file.type,
-        }),
+        body: JSON.stringify({ contentType }),
       })
 
-      await fetch(uploadData.uploadUrl, {
+      if (!uploadData.uploadUrl || !uploadData.imageKey) {
+        throw new Error('A API não retornou uploadUrl ou imageKey.')
+      }
+
+      currentStep = 'Etapa 2 - Enviar foto para o S3'
+      setMessage(`${currentStep}...`)
+
+      const uploadResponse = await fetch(uploadData.uploadUrl, {
         method: 'PUT',
         headers: {
-          'Content-Type': file.type,
+          'Content-Type': contentType,
         },
         body: file,
       })
 
+      if (!uploadResponse.ok) {
+        throw new Error(`Falha no upload para S3. Status: ${uploadResponse.status}`)
+      }
+
+      currentStep = 'Etapa 3 - Chamar Rekognition para ler a capa'
+      setMessage(`${currentStep}...`)
+
       const scanData = await api('/books/scan', {
         method: 'POST',
-        body: JSON.stringify({
-          imageKey: uploadData.imageKey,
-        }),
+        body: JSON.stringify({ imageKey: uploadData.imageKey }),
       })
+
+      currentStep = 'Etapa 4 - Leitura concluída'
+      setMessage('Etapa 4/4: leitura concluída. Confira os dados antes de salvar.')
 
       setScanResult(scanData)
 
@@ -104,10 +152,9 @@ function App() {
         coverImageKey: uploadData.imageKey,
         status: 'Tenho',
       })
-
-      setMessage('Capa lida com sucesso. Confira os dados antes de salvar.')
     } catch (error) {
-      setMessage(`Erro ao ler a capa: ${error.message}`)
+      console.error('Erro detalhado no handleScan:', error)
+      setMessage(`Erro na ${currentStep}: ${error.message}`)
     } finally {
       setLoading(false)
     }
@@ -129,19 +176,7 @@ function App() {
       })
 
       setMessage('Livro cadastrado com sucesso!')
-
-      setFile(null)
-      setScanResult(null)
-      setForm({
-        bookId: '',
-        title: '',
-        publisher: '',
-        edition: '',
-        category: '',
-        coverImageKey: '',
-        status: 'Tenho',
-      })
-
+      clearForm()
       await loadBooks()
     } catch (error) {
       setMessage(`Erro ao salvar livro: ${error.message}`)
@@ -189,6 +224,7 @@ function App() {
     setFile(null)
     setScanResult(null)
     setMessage('')
+    setMatches([])
     setForm({
       bookId: '',
       title: '',
@@ -205,9 +241,7 @@ function App() {
       <header style={styles.header}>
         <div>
           <h1 style={styles.title}>Minha Biblioteca</h1>
-          <p style={styles.subtitle}>
-            Cadastre seus livros por foto e evite comprar repetido.
-          </p>
+          <p style={styles.subtitle}>Cadastre seus livros por foto e evite comprar repetido.</p>
         </div>
 
         <button style={styles.secondaryButton} onClick={() => signOut()}>
@@ -215,31 +249,25 @@ function App() {
         </button>
       </header>
 
-      {message && (
-        <div style={styles.message}>
-          {message}
-        </div>
-      )}
+      {message && <div style={styles.message}>{message}</div>}
 
       <section style={styles.card}>
         <h2 style={styles.sectionTitle}>Cadastrar livro por foto</h2>
-
         <p style={styles.helpText}>
-          Tire uma foto da capa do livro. O sistema vai tentar ler o texto da imagem
-          e sugerir os dados principais.
+          Tire uma foto da capa do livro. O sistema vai tentar ler o texto da imagem e sugerir os dados principais.
         </p>
 
         <input
           type="file"
           accept="image/jpeg,image/png"
           capture="environment"
-          onChange={(event) => setFile(event.target.files[0])}
+          onChange={(event) => setFile(event.target.files?.[0] || null)}
           style={styles.fileInput}
         />
 
         {file && (
           <p style={styles.selectedFile}>
-            Foto selecionada: {file.name}
+            Foto selecionada: {file.name} | Tipo: {file.type || 'sem tipo'}
           </p>
         )}
 
@@ -256,7 +284,6 @@ function App() {
         {scanResult && (
           <div style={styles.resultBox}>
             <h3>Texto detectado na capa</h3>
-
             {(scanResult.detectedText || []).length === 0 ? (
               <p>Nenhum texto foi detectado. Você pode preencher manualmente.</p>
             ) : (
@@ -323,10 +350,7 @@ function App() {
 
       <section style={styles.card}>
         <h2 style={styles.sectionTitle}>Pesquisar antes de comprar</h2>
-
-        <p style={styles.helpText}>
-          Digite parte do título para verificar se você já tem esse livro cadastrado.
-        </p>
+        <p style={styles.helpText}>Digite parte do título para verificar se você já tem esse livro cadastrado.</p>
 
         <div style={styles.searchRow}>
           <input
@@ -335,9 +359,7 @@ function App() {
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                searchBook()
-              }
+              if (event.key === 'Enter') searchBook()
             }}
           />
 
@@ -349,7 +371,6 @@ function App() {
         {matches.length > 0 && (
           <div style={styles.resultBox}>
             <h3>Você já pode ter esse livro:</h3>
-
             <ul>
               {matches.map((book) => (
                 <li key={book.bookId}>
@@ -363,9 +384,7 @@ function App() {
         )}
 
         {matches.length === 0 && search && (
-          <p style={styles.helpText}>
-            Nenhum resultado encontrado para essa busca.
-          </p>
+          <p style={styles.helpText}>Nenhum resultado encontrado para essa busca.</p>
         )}
       </section>
 
@@ -380,22 +399,13 @@ function App() {
               <div key={book.bookId} style={styles.bookItem}>
                 <div>
                   <strong>{book.title}</strong>
-
                   <p style={styles.bookMeta}>
                     Editora: {book.publisher || '-'} | Categoria: {book.category || '-'} | Status: {book.status || '-'}
                   </p>
-
-                  {book.edition && (
-                    <p style={styles.bookMeta}>
-                      Edição: {book.edition}
-                    </p>
-                  )}
+                  {book.edition && <p style={styles.bookMeta}>Edição: {book.edition}</p>}
                 </div>
 
-                <button
-                  style={styles.dangerButton}
-                  onClick={() => deleteBook(book.bookId)}
-                >
+                <button style={styles.dangerButton} onClick={() => deleteBook(book.bookId)}>
                   Remover
                 </button>
               </div>
@@ -424,14 +434,8 @@ const styles = {
     alignItems: 'center',
     marginBottom: 24,
   },
-  title: {
-    margin: 0,
-    fontSize: 36,
-  },
-  subtitle: {
-    marginTop: 8,
-    color: '#64748b',
-  },
+  title: { margin: 0, fontSize: 36 },
+  subtitle: { marginTop: 8, color: '#64748b' },
   card: {
     background: '#ffffff',
     border: '1px solid #e5e7eb',
@@ -440,13 +444,8 @@ const styles = {
     marginBottom: 24,
     boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
   },
-  sectionTitle: {
-    marginTop: 0,
-  },
-  helpText: {
-    color: '#64748b',
-    lineHeight: 1.5,
-  },
+  sectionTitle: { marginTop: 0 },
+  helpText: { color: '#64748b', lineHeight: 1.5 },
   message: {
     background: '#ecfeff',
     border: '1px solid #67e8f9',
@@ -454,22 +453,11 @@ const styles = {
     padding: 12,
     borderRadius: 8,
     marginBottom: 16,
+    whiteSpace: 'pre-wrap',
   },
-  fileInput: {
-    display: 'block',
-    marginTop: 16,
-    marginBottom: 8,
-  },
-  selectedFile: {
-    color: '#475569',
-    fontSize: 14,
-  },
-  buttonRow: {
-    display: 'flex',
-    gap: 12,
-    flexWrap: 'wrap',
-    marginTop: 16,
-  },
+  fileInput: { display: 'block', marginTop: 16, marginBottom: 8 },
+  selectedFile: { color: '#475569', fontSize: 14 },
+  buttonRow: { display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 16 },
   primaryButton: {
     background: '#2563eb',
     color: '#ffffff',
@@ -504,12 +492,7 @@ const styles = {
     padding: 16,
     marginTop: 20,
   },
-  label: {
-    display: 'block',
-    marginTop: 12,
-    marginBottom: 6,
-    fontWeight: 'bold',
-  },
+  label: { display: 'block', marginTop: 12, marginBottom: 6, fontWeight: 'bold' },
   input: {
     display: 'block',
     width: '100%',
@@ -519,11 +502,7 @@ const styles = {
     marginBottom: 8,
     boxSizing: 'border-box',
   },
-  searchRow: {
-    display: 'flex',
-    gap: 12,
-    flexWrap: 'wrap',
-  },
+  searchRow: { display: 'flex', gap: 12, flexWrap: 'wrap' },
   searchInput: {
     flex: 1,
     minWidth: 240,
@@ -531,11 +510,7 @@ const styles = {
     borderRadius: 8,
     border: '1px solid #cbd5e1',
   },
-  bookList: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 12,
-  },
+  bookList: { display: 'flex', flexDirection: 'column', gap: 12 },
   bookItem: {
     border: '1px solid #e5e7eb',
     borderRadius: 8,
@@ -545,11 +520,7 @@ const styles = {
     gap: 16,
     alignItems: 'center',
   },
-  bookMeta: {
-    margin: '6px 0 0',
-    color: '#64748b',
-    fontSize: 14,
-  },
+  bookMeta: { margin: '6px 0 0', color: '#64748b', fontSize: 14 },
 }
 
 export default App

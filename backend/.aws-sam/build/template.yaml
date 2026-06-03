@@ -38,8 +38,15 @@ Resources:
           AllowedMethods:
           - PUT
           - GET
+          - HEAD
           AllowedOrigins:
-          - '*'
+          - https://main.d1hfu19yup9flj.amplifyapp.com
+          - https://www.giana.top
+          - https://giana.top
+          - http://localhost:5173
+          ExposedHeaders:
+          - ETag
+          MaxAge: 3000
   BookUsersPool:
     Type: AWS::Cognito::UserPool
     Properties:
@@ -48,6 +55,8 @@ Resources:
       - email
       UsernameAttributes:
       - email
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: true
       Policies:
         PasswordPolicy:
           MinimumLength: 8
@@ -88,8 +97,15 @@ Resources:
         AllowHeaders:
         - Authorization
         - Content-Type
+        - X-Amz-Date
+        - X-Amz-Security-Token
+        - X-Api-Key
         AllowOrigins:
-        - '*'
+        - https://main.d1hfu19yup9flj.amplifyapp.com
+        - https://www.giana.top
+        - https://giana.top
+        - http://localhost:5173
+        MaxAge: 600
   BookFunction:
     Type: AWS::Serverless::Function
     Properties:

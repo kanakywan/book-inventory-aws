@@ -18,6 +18,11 @@ COVERS_BUCKET = os.environ["COVERS_BUCKET"]
 
 table = dynamodb.Table(BOOKS_TABLE)
 
+ALLOWED_CONTENT_TYPES = {
+    "image/jpeg": "jpg",
+    "image/png": "png",
+}
+
 
 def response(status_code, body):
     return {
@@ -74,7 +79,7 @@ def lambda_handler(event, context):
         if path.startswith("/books/") and method == "DELETE":
             return delete_book(event)
 
-        return response(404, {"message": "Rota não encontrada"})
+        return response(404, {"message": "Rota não encontrada", "path": path, "method": method})
 
     except Exception as error:
         return response(500, {"message": str(error)})
@@ -82,15 +87,20 @@ def lambda_handler(event, context):
 
 def create_upload_url(event):
     user_id = get_user_id(event)
-
     body = json.loads(event.get("body") or "{}")
     content_type = body.get("contentType", "image/jpeg")
 
-    if content_type not in ["image/jpeg", "image/png"]:
-        return response(400, {"message": "Formato permitido: JPEG ou PNG"})
+    if content_type not in ALLOWED_CONTENT_TYPES:
+        return response(
+            400,
+            {
+                "message": "Formato permitido: JPEG ou PNG",
+                "receivedContentType": content_type,
+            },
+        )
 
     book_id = str(uuid.uuid4())
-    extension = "png" if content_type == "image/png" else "jpg"
+    extension = ALLOWED_CONTENT_TYPES[content_type]
     image_key = f"covers/{user_id}/{book_id}.{extension}"
 
     upload_url = s3.generate_presigned_url(
@@ -109,13 +119,14 @@ def create_upload_url(event):
             "bookId": book_id,
             "imageKey": image_key,
             "uploadUrl": upload_url,
+            "bucket": COVERS_BUCKET,
+            "contentType": content_type,
         },
     )
 
 
 def scan_book_cover(event):
     user_id = get_user_id(event)
-
     body = json.loads(event.get("body") or "{}")
     image_key = body.get("imageKey")
 
@@ -192,10 +203,7 @@ def list_books(event):
         ExpressionAttributeValues={":pk": f"USER#{user_id}"},
     )
 
-    books = sorted(
-        result.get("Items", []),
-        key=lambda item: item.get("title", "").lower(),
-    )
+    books = sorted(result.get("Items", []), key=lambda item: item.get("title", "").lower())
 
     return response(200, {"books": books})
 
@@ -219,7 +227,9 @@ def search_books(event):
     matches = []
     for book in books:
         normalized_title = book.get("normalizedTitle", "")
-        if normalized_query in normalized_title:
+        normalized_publisher = normalize_text(book.get("publisher", ""))
+        searchable = f"{normalized_title} {normalized_publisher}"
+        if normalized_query and normalized_query in searchable:
             matches.append(book)
 
     return response(200, {"query": q, "matches": matches})

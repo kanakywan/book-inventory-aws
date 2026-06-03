@@ -4,6 +4,7 @@ import { Amplify } from 'aws-amplify'
 import { Authenticator } from '@aws-amplify/ui-react'
 import '@aws-amplify/ui-react/styles.css'
 import App from './App.jsx'
+import './index.css'
 
 Amplify.configure({
   Auth: {
@@ -16,7 +17,7 @@ Amplify.configure({
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <Authenticator>
+    <Authenticator hideSignUp={true}>
       <App />
     </Authenticator>
   </React.StrictMode>,
