@@ -44,6 +44,7 @@ Resources:
               - "https://main.d1hfu19yup9flj.amplifyapp.com"
               - "https://www.giana.top"
               - "https://giana.top"
+              - "https://www.giana.top"
               - "http://localhost:5173"
             ExposedHeaders:
               - ETag
@@ -57,8 +58,8 @@ Resources:
         - email
       UsernameAttributes:
         - email
-      AdminCreateUserConfig:
-        AllowAdminCreateUserOnly: true
+##      AdminCreateUserConfig:
+##        AllowAdminCreateUserOnly: false
       Policies:
         PasswordPolicy:
           MinimumLength: 8
